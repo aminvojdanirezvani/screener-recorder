@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0;background:transparent;overflow:hidden">
+<script>
+(function () {
+  var mr, chunks, stream, parentOrigin;
+
+  window.addEventListener('message', function (e) {
+    if (!e.data || !e.data.type) return;
+    // Lock to the first parent that contacts us
+    if (!parentOrigin) parentOrigin = e.origin;
+    if (e.origin !== parentOrigin) return;
+
+    if (e.data.type === 'start') startRec();
+    else if (e.data.type === 'stop') stopRec();
+  });
+
+  function reply(msg) {
+    window.parent.postMessage(msg, parentOrigin || '*');
+  }
+
+  function startRec() {
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      .then(function (s) {
+        stream = s;
+        chunks = [];
+        var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus' : 'audio/webm';
+        mr = new MediaRecorder(s, { mimeType: mime });
+        mr.ondataavailable = function (e) { if (e.data.size > 0) chunks.push(e.data); };
+        mr.onstop = function () {
+          var blob = new Blob(chunks, { type: mime });
+          var reader = new FileReader();
+          reader.onload = function () {
+            reply({ type: 'recording', base64: reader.result.split(',')[1], mimeType: mime });
+          };
+          reader.readAsDataURL(blob);
+          stream.getTracks().forEach(function (t) { t.stop(); });
+        };
+        mr.start(1000);
+        reply({ type: 'started' });
+      })
+      .catch(function (err) {
+        reply({ type: 'error', message: err.message });
+      });
+  }
+
+  function stopRec() {
+    if (mr && mr.state !== 'inactive') mr.stop();
+  }
+})();
+</script>
+</body>
+</html>
