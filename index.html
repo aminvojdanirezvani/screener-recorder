@@ -3,54 +3,103 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Recording</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #F8FAFC; color: #0F172A;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      height: 100vh; padding: 28px; text-align: center;
+      -webkit-font-smoothing: antialiased;
+    }
+    .label { font-size: 11px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: #2563EB; background: #EFF6FF; padding: 3px 10px; border-radius: 20px; margin-bottom: 14px; display: inline-block; }
+    h2 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+    .sub { font-size: 13px; color: #64748B; margin-bottom: 22px; }
+    .timer { font-size: 52px; font-weight: 800; font-variant-numeric: tabular-nums; color: #EF4444; letter-spacing: 2px; margin-bottom: 20px; display: none; }
+    .status { font-size: 13px; color: #64748B; margin-top: 14px; min-height: 18px; }
+    button {
+      font: inherit; font-size: 15px; font-weight: 600;
+      padding: 13px 32px; border-radius: 10px; border: none; cursor: pointer;
+      transition: opacity 0.12s;
+    }
+    button:active { opacity: 0.85; }
+    .btn-start { background: #2563EB; color: #fff; box-shadow: 0 1px 4px rgba(37,99,235,0.35); }
+    .btn-stop  { background: #EF4444; color: #fff; box-shadow: 0 1px 4px rgba(239,68,68,0.35); display: none; }
+  </style>
 </head>
-<body style="margin:0;background:transparent;overflow:hidden">
+<body>
+  <span class="label">Recalling Sentences</span>
+  <h2>Student Screener</h2>
+  <p class="sub">Tap start, then repeat the sentence.</p>
+  <div id="timer" class="timer">0:00</div>
+  <button id="btn-start" class="btn-start" onclick="startRec()">● Start Recording</button>
+  <button id="btn-stop"  class="btn-stop"  onclick="stopRec()">■ Stop</button>
+  <div id="status" class="status">Ready when you are.</div>
+
 <script>
 (function () {
-  var mr, chunks, stream, parentOrigin;
+  var mr, chunks, stream, interval, secs = 0;
 
-  window.addEventListener('message', function (e) {
-    if (!e.data || !e.data.type) return;
-    // Lock to the first parent that contacts us
-    if (!parentOrigin) parentOrigin = e.origin;
-    if (e.origin !== parentOrigin) return;
-
-    if (e.data.type === 'start') startRec();
-    else if (e.data.type === 'stop') stopRec();
-  });
-
-  function reply(msg) {
-    window.parent.postMessage(msg, parentOrigin || '*');
-  }
-
-  function startRec() {
+  window.startRec = function startRec() {
     navigator.mediaDevices.getUserMedia({ audio: true, video: false })
       .then(function (s) {
-        stream = s;
-        chunks = [];
+        stream = s; chunks = [];
         var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
           ? 'audio/webm;codecs=opus' : 'audio/webm';
         mr = new MediaRecorder(s, { mimeType: mime });
         mr.ondataavailable = function (e) { if (e.data.size > 0) chunks.push(e.data); };
         mr.onstop = function () {
+          clearInterval(interval);
+          set('status', 'Saving…');
           var blob = new Blob(chunks, { type: mime });
           var reader = new FileReader();
           reader.onload = function () {
-            reply({ type: 'recording', base64: reader.result.split(',')[1], mimeType: mime });
+            if (window.opener) {
+              window.opener.postMessage(
+                { type: 'recording', base64: reader.result.split(',')[1], mimeType: mime }, '*'
+              );
+            }
+            window.close();
           };
           reader.readAsDataURL(blob);
           stream.getTracks().forEach(function (t) { t.stop(); });
         };
         mr.start(1000);
-        reply({ type: 'started' });
+        show('btn-start', false); show('btn-stop', true); show('timer', true);
+        set('status', 'Recording…');
+        secs = 0;
+        interval = setInterval(function () {
+          secs++;
+          var m = Math.floor(secs / 60);
+          var s = String(secs % 60).padStart(2, '0');
+          set('timer', m + ':' + s);
+          if (secs >= 60) stopRec();
+        }, 1000);
       })
       .catch(function (err) {
-        reply({ type: 'error', message: err.message });
+        set('status', 'Microphone error: ' + err.message);
+        if (window.opener) window.opener.postMessage({ type: 'error', message: err.message }, '*');
       });
-  }
+  };
 
-  function stopRec() {
-    if (mr && mr.state !== 'inactive') mr.stop();
+  window.stopRec = function stopRec() {
+    if (mr && mr.state !== 'inactive') {
+      mr.stop();
+      show('btn-stop', false);
+      set('status', 'Processing…');
+      clearInterval(interval);
+    }
+  };
+
+  function set(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = val;
+  }
+  function show(id, visible) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = visible ? 'inline-block' : 'none';
   }
 })();
 </script>
